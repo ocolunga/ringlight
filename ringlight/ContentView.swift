@@ -7,15 +7,10 @@
 
 import SwiftUI
 
+// Main content view - unused since we use custom windows
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
+        EmptyView()
     }
 }
 
