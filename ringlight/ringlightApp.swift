@@ -21,6 +21,8 @@ struct ringlightApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     var overlayWindow: NSWindow?
+    var statusItem: NSStatusItem?
+    var popover: NSPopover?
     
     @Published var ringThickness: CGFloat = 45
     @Published var brightness: CGFloat = 1.0
@@ -51,8 +53,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Hide dock icon - make it a pure menu bar app
+        NSApp.setActivationPolicy(.accessory)
+        
         NSApplication.shared.windows.forEach { $0.close() }
         createOverlayWindow()
+        createMenuBarIcon()
         setupGlobalKeyboardShortcuts()
     }
     
@@ -78,6 +84,44 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         window.orderFrontRegardless()
     }
     
+    func createMenuBarIcon() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = statusItem?.button {
+            // Create a custom Rectangular Ring Light icon for the menu bar
+            let size = NSSize(width: 20, height: 16)
+            let image = NSImage(size: size, flipped: false) { rect in
+                let inset: CGFloat = 2
+                let thickness: CGFloat = 2.0
+                let outerRect = rect.insetBy(dx: inset, dy: inset)
+                
+                // Draw a rounded rectangular ring to match the app's look
+                let path = NSBezierPath(roundedRect: outerRect, xRadius: 3, yRadius: 3)
+                path.lineWidth = thickness
+                NSColor.labelColor.setStroke()
+                path.stroke()
+                
+                return true
+            }
+            image.isTemplate = true
+            button.image = image
+            button.action = #selector(togglePopover)
+            button.target = self
+        }
+        popover = NSPopover()
+        popover?.contentSize = NSSize(width: 260, height: 350)
+        popover?.behavior = .transient
+        popover?.contentViewController = NSHostingController(rootView: MenuBarControlView(appDelegate: self))
+    }
+    
+    @objc func togglePopover() {
+        guard let popover = popover, let button = statusItem?.button else { return }
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+    }
+    
     func setupGlobalKeyboardShortcuts() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             switch event.keyCode {
@@ -97,6 +141,95 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 class OverlayWindow: NSWindow {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+}
+
+// MARK: - Components
+struct ControlSlider: View {
+    let icon: String
+    let label: String
+    @Binding var value: CGFloat
+    let range: ClosedRange<CGFloat>
+    var unit: String = ""
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .frame(width: 18)
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                Text("\(Int(unit == "%" ? value * 100 : value))\(unit)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+            
+            Slider(value: $value, in: range)
+                .controlSize(.small)
+        }
+    }
+}
+
+struct TemperatureSlider: View {
+    @Binding var value: CGFloat
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "thermometer.medium")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .frame(width: 18)
+                Text("Temperature")
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+            }
+            
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 1.0, green: 0.65, blue: 0.3),
+                                    Color.white,
+                                    Color(red: 0.75, green: 0.88, blue: 1.0)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(height: 20)
+                    
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 18, height: 18)
+                        .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+                        .offset(x: value * (geometry.size.width - 18))
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { gesture in
+                                    let newValue = gesture.location.x / geometry.size.width
+                                    value = min(max(newValue, 0), 1)
+                                }
+                        )
+                }
+            }
+            .frame(height: 20)
+            
+            HStack {
+                Text("Warm")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text("Cool")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
 }
 
 // MARK: - Views
@@ -172,5 +305,59 @@ struct RoundedRingShape: Shape {
 extension RoundedRingShape {
     func fill(_ content: some ShapeStyle) -> some View {
         self.fill(content, style: FillStyle(eoFill: true))
+    }
+}
+
+struct MenuBarControlView: View {
+    @ObservedObject var appDelegate: AppDelegate
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Minimal Header
+            HStack {
+                Text("Ring Light")
+                    .font(.system(size: 13, weight: .bold))
+                Spacer()
+                Toggle("", isOn: $appDelegate.isActive)
+                    .toggleStyle(.switch)
+                    .scaleEffect(0.7)
+                    .labelsHidden()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            
+            Divider()
+            
+            // Controls - No Scroll
+            VStack(spacing: 20) {
+                ControlSlider(icon: "sun.max", label: "Brightness", value: $appDelegate.brightness, range: 0.1...1.0, unit: "%")
+                
+                TemperatureSlider(value: $appDelegate.colorTemperature)
+                
+                ControlSlider(icon: "rectangle.expand.vertical", label: "Thickness", value: $appDelegate.ringThickness, range: 10...100, unit: "px")
+                
+                ControlSlider(icon: "squareshape.controlhandles.on.squareshape.controlhandles", label: "Roundness", value: $appDelegate.cornerRadius, range: 20...120, unit: "px")
+            }
+            .padding(16)
+            
+            Divider()
+            
+            // Minimal Footer
+            HStack {
+                Text("ESC to quit")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button(action: { NSApplication.shared.terminate(nil) }) {
+                    Text("Quit")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14) // More balanced padding
+        }
+        .frame(width: 260, height: 360) // Slightly taller for breathing room
     }
 }
