@@ -108,7 +108,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             button.target = self
         }
         popover = NSPopover()
-        popover?.contentSize = NSSize(width: 260, height: 350)
+        popover?.contentSize = NSSize(width: 260, height: 360)
         popover?.behavior = .transient
         popover?.contentViewController = NSHostingController(rootView: MenuBarControlView(appDelegate: self))
     }
