@@ -1,0 +1,29 @@
+# Xcode
+#
+# gitignore contributors: prince-chrismc, v-braun, r-landmere, s-clark
+
+## Build results
+build/
+DerivedData/
+
+## Others
+*.moved-aside
+*.xcuserstate
+
+## Dependency manager
+# CocoaPods - uncomment if used
+# Pods/
+# *.xcworkspace
+
+## User settings
+xcuserdata/
+project.xcworkspace/xcuserdata/
+
+## Scripts
+*.sh
+
+## macOS
+.DS_Store
+*.swp
+*.lock
+
