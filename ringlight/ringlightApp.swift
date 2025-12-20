@@ -27,7 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var ringThickness: CGFloat = 45
     @Published var brightness: CGFloat = 1.0
     @Published var colorTemperature: CGFloat = 0.5
-    @Published var cornerRadius: CGFloat = 40
+    let cornerRadius: CGFloat = 40 // Default fixed roundness
     @Published var glowIntensity: CGFloat = 0.5
     @Published var isActive: Bool = true
     @Published var margin: CGFloat = 0
@@ -108,7 +108,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             button.target = self
         }
         popover = NSPopover()
-        popover?.contentSize = NSSize(width: 260, height: 360)
+        popover?.contentSize = NSSize(width: 260, height: 300)
         popover?.behavior = .transient
         popover?.contentViewController = NSHostingController(rootView: MenuBarControlView(appDelegate: self))
     }
@@ -335,8 +335,6 @@ struct MenuBarControlView: View {
                 TemperatureSlider(value: $appDelegate.colorTemperature)
                 
                 ControlSlider(icon: "rectangle.expand.vertical", label: "Thickness", value: $appDelegate.ringThickness, range: 10...100, unit: "px")
-                
-                ControlSlider(icon: "squareshape.controlhandles.on.squareshape.controlhandles", label: "Roundness", value: $appDelegate.cornerRadius, range: 20...120, unit: "px")
             }
             .padding(16)
             
@@ -358,6 +356,6 @@ struct MenuBarControlView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14) // More balanced padding
         }
-        .frame(width: 260, height: 360) // Slightly taller for breathing room
+        .frame(width: 260, height: 300)
     }
 }
