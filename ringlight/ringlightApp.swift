@@ -9,6 +9,48 @@ import SwiftUI
 import AppKit
 import AVFoundation
 import CoreMediaIO
+import CoreGraphics
+
+// Brightness control helper using dynamic loading
+class BrightnessControl {
+    typealias SetBrightnessFunc = @convention(c) (CGDirectDisplayID, Float) -> Int32
+    typealias GetBrightnessFunc = @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<Float>) -> Int32
+    
+    private static var setBrightnessFunc: SetBrightnessFunc?
+    private static var getBrightnessFunc: GetBrightnessFunc?
+    private static var isLoaded = false
+    
+    static func loadDisplayServices() {
+        guard !isLoaded else { return }
+        isLoaded = true
+        
+        let handle = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_NOW)
+        if handle != nil {
+            if let setBrightness = dlsym(handle, "DisplayServicesSetBrightness") {
+                setBrightnessFunc = unsafeBitCast(setBrightness, to: SetBrightnessFunc.self)
+            }
+            if let getBrightness = dlsym(handle, "DisplayServicesGetBrightness") {
+                getBrightnessFunc = unsafeBitCast(getBrightness, to: GetBrightnessFunc.self)
+            }
+        }
+    }
+    
+    static func setBrightness(_ level: Float) {
+        loadDisplayServices()
+        if let setFunc = setBrightnessFunc {
+            _ = setFunc(CGMainDisplayID(), level)
+        }
+    }
+    
+    static func getBrightness() -> Float {
+        loadDisplayServices()
+        var level: Float = 1.0
+        if let getFunc = getBrightnessFunc {
+            _ = getFunc(CGMainDisplayID(), &level)
+        }
+        return level
+    }
+}
 
 @main
 struct ringlightApp: App {
@@ -21,7 +63,7 @@ struct ringlightApp: App {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverDelegate {
     var overlayWindow: NSWindow?
     var statusItem: NSStatusItem?
     var popover: NSPopover?
@@ -29,22 +71,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     var localMouseMonitor: Any?
     
     @Published var ringThickness: CGFloat = 45
-    @Published var brightness: CGFloat = 1.0
+    @Published var brightness: CGFloat = 1.0 {
+        didSet {
+            setSystemBrightness(Float(brightness))
+        }
+    }
     @Published var colorTemperature: CGFloat = 0.5
     let cornerRadius: CGFloat = 40 // Default fixed roundness
     @Published var glowIntensity: CGFloat = 0.5
     @Published var isActive: Bool = true
     @Published var avoidMouse: Bool = true
-    @Published var showCameraPreview: Bool = false {
-        didSet {
-            if showCameraPreview {
-                startCamera()
-            } else {
-                stopCamera()
-            }
-            updatePopoverSize()
-        }
-    }
+    @Published var showCameraPreview: Bool = false
     @Published var margin: CGFloat = 20
     @Published var mouseLocation: CGPoint = .zero
     @Published var isMouseOverRing: Bool = false
@@ -102,11 +139,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
     
     func updatePopoverSize() {
-        let height: CGFloat = showCameraPreview ? 500 : 360
-        popover?.contentSize = NSSize(width: 260, height: height)
+        popover?.contentSize = NSSize(width: 260, height: 500)
+    }
+    
+    func setSystemBrightness(_ level: Float) {
+        BrightnessControl.setBrightness(level)
+    }
+    
+    func getSystemBrightness() -> Float {
+        return BrightnessControl.getBrightness()
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Match app brightness to system brightness on launch
+        self.brightness = CGFloat(getSystemBrightness())
+        
         // Hide dock icon - make it a pure menu bar app
         NSApp.setActivationPolicy(.accessory)
         
@@ -200,9 +247,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             button.target = self
         }
         popover = NSPopover()
-        popover?.contentSize = NSSize(width: 260, height: 360)
+        popover?.contentSize = NSSize(width: 260, height: 500)
         popover?.behavior = .transient
+        popover?.delegate = self
         popover?.contentViewController = NSHostingController(rootView: MenuBarControlView(appDelegate: self))
+    }
+    
+    func popoverWillShow(_ notification: Notification) {
+        showCameraPreview = true
+        startCamera()
+        updatePopoverSize()
+    }
+    
+    func popoverDidClose(_ notification: Notification) {
+        showCameraPreview = false
+        stopCamera()
     }
     
     @objc func togglePopover() {
@@ -504,7 +563,7 @@ struct MenuBarControlView: View {
             
             // Controls - No Scroll
             VStack(spacing: 12) {
-                ControlSlider(icon: "sun.max", label: "Brightness", value: $appDelegate.brightness, range: 0.1...1.0, unit: "%")
+                ControlSlider(icon: "sun.max.fill", label: "Brightness", value: $appDelegate.brightness, range: 0.1...1.0, unit: "%")
                 
                 TemperatureSlider(value: $appDelegate.colorTemperature)
                 
@@ -517,21 +576,6 @@ struct MenuBarControlView: View {
                         .frame(width: 18)
                     Text("Avoid Mouse")
                         .font(.system(size: 12, weight: .medium))
-                    Spacer()
-                }
-                
-                HStack(spacing: 8) {
-                    Toggle("", isOn: $appDelegate.showCameraPreview)
-                        .toggleStyle(.checkbox)
-                        .labelsHidden()
-                        .frame(width: 18)
-                    HStack(spacing: 4) {
-                        Text("Camera Preview")
-                            .font(.system(size: 12, weight: .medium))
-                        Image(systemName: "camera.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                    }
                     Spacer()
                 }
             }
@@ -567,6 +611,6 @@ struct MenuBarControlView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14) // More balanced padding
         }
-        .frame(width: 260, height: appDelegate.showCameraPreview ? 500 : 360)
+        .frame(width: 260, height: 500)
     }
 }
