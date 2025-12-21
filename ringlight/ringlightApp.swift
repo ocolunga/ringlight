@@ -406,18 +406,15 @@ struct MenuBarControlView: View {
                 
                 ControlSlider(icon: "rectangle.expand.vertical", label: "Thickness", value: $appDelegate.ringThickness, range: 10...100, unit: "px")
                 
-                Toggle(isOn: $appDelegate.avoidMouse) {
-                    HStack {
-                        Image(systemName: "cursorarrow.and.square.on.square")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                            .frame(width: 18)
-                        Text("Avoid Mouse")
-                            .font(.system(size: 12, weight: .medium))
-                    }
+                HStack(spacing: 8) {
+                    Toggle("", isOn: $appDelegate.avoidMouse)
+                        .toggleStyle(.checkbox)
+                        .labelsHidden()
+                        .frame(width: 18)
+                    Text("Avoid Mouse")
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer()
                 }
-                .toggleStyle(.checkbox)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(16)
             
