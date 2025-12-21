@@ -43,7 +43,7 @@ Apple recently introduced "Edge Light" in macOS Tahoe (26.2), but the feature is
 
 ## Installation & Usage
 
-1. **Clone the repository**: `git clone https://github.com/YOUR_USERNAME/ringlight.git`
+1. **Clone the repository**: `git clone https://github.com/itsOmSarraf/ringlight.git`
 2. **Open in Xcode**: `ringlight.xcodeproj`
 3. **Build and Run**: Press `⌘R`.
 4. **Operation**: Click the rectangular icon in the menu bar to toggle and adjust settings.

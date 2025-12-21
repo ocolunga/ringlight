@@ -424,11 +424,23 @@ struct MenuBarControlView: View {
             Divider()
             
             // Minimal Footer
-            HStack {
-                Text("ESC to quit")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+            HStack(spacing: 12) {
+                Button(action: {
+                    if let url = URL(string: "https://github.com/itsOmSarraf/ringlight") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "star.fill")
+                            .foregroundColor(.yellow)
+                        Text("Star on GitHub")
+                    }
+                    .font(.system(size: 10, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                
                 Spacer()
+                
                 Button(action: { NSApplication.shared.terminate(nil) }) {
                     Text("Quit")
                         .font(.system(size: 11, weight: .medium))
