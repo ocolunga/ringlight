@@ -32,6 +32,7 @@ Apple recently introduced "Edge Light" in macOS Tahoe (26.2), but the feature is
 ## Features
 
 - **Rectangular Ring**: Matches the aspect ratio of your display for maximum coverage.
+- **Mouse Avoidance**: Smart transparency hole follows your cursor to prevent blocking your view while working.
 - **Click-Through Center**: The center remains transparent and ignores mouse events, allowing you to interact with windows behind the light normally.
 - **Temperature Slider**: Adjust from Warm (Studio Orange) to Cool (Arctic Blue) to match your environment.
 - **Brightness & Thickness**: Fine-tune the intensity and width of the illumination.
@@ -46,7 +47,7 @@ Apple recently introduced "Edge Light" in macOS Tahoe (26.2), but the feature is
 1. **Clone the repository**: `git clone https://github.com/itsOmSarraf/ringlight.git`
 2. **Open in Xcode**: `ringlight.xcodeproj`
 3. **Build and Run**: Press `⌘R`.
-4. **Operation**: Click the rectangular icon in the menu bar to toggle and adjust settings.
+4. **Operation**: Click the rectangular icon in the menu bar to adjust brightness, thickness, temperature, and toggle **Avoid Mouse**.
 5. **Shortcuts**: 
    - `SPACE`: Toggle light ON/OFF.
    - `ESC`: Quit application.
