@@ -23,6 +23,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     var overlayWindow: NSWindow?
     var statusItem: NSStatusItem?
     var popover: NSPopover?
+    var mouseMonitor: Any?
+    var localMouseMonitor: Any?
     
     @Published var ringThickness: CGFloat = 45
     @Published var brightness: CGFloat = 1.0
@@ -30,7 +32,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let cornerRadius: CGFloat = 40 // Default fixed roundness
     @Published var glowIntensity: CGFloat = 0.5
     @Published var isActive: Bool = true
+    @Published var avoidMouse: Bool = true
     @Published var margin: CGFloat = 0
+    @Published var mouseLocation: CGPoint = .zero
+    @Published var isMouseOverRing: Bool = false
     
     var ringColor: NSColor {
         temperatureToColor(colorTemperature)
@@ -60,6 +65,44 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         createOverlayWindow()
         createMenuBarIcon()
         setupGlobalKeyboardShortcuts()
+        setupMouseTracking()
+    }
+    
+    func setupMouseTracking() {
+        // Track mouse globally
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+            self?.updateMouseLocation()
+        }
+        // Also track locally for when the app is active
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+            self?.updateMouseLocation()
+            return event
+        }
+    }
+    
+    deinit {
+        if let monitor = mouseMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let localMonitor = localMouseMonitor {
+            NSEvent.removeMonitor(localMonitor)
+        }
+    }
+    
+    func updateMouseLocation() {
+        let location = NSEvent.mouseLocation
+        guard let screen = NSScreen.main else { return }
+        
+        // Convert from screen coordinates (bottom-left) to SwiftUI (top-left)
+        let screenFrame = screen.frame
+        let convertedLocation = CGPoint(
+            x: location.x - screenFrame.origin.x,
+            y: screenFrame.height - (location.y - screenFrame.origin.y)
+        )
+        
+        if self.mouseLocation != convertedLocation {
+            self.mouseLocation = convertedLocation
+        }
     }
     
     func createOverlayWindow() {
@@ -108,7 +151,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             button.target = self
         }
         popover = NSPopover()
-        popover?.contentSize = NSSize(width: 260, height: 300)
+        popover?.contentSize = NSSize(width: 260, height: 340)
         popover?.behavior = .transient
         popover?.contentViewController = NSHostingController(rootView: MenuBarControlView(appDelegate: self))
     }
@@ -262,6 +305,33 @@ struct RingLightOverlay: View {
                     )
                     .fill(Color(nsColor: appDelegate.ringColor).opacity(appDelegate.brightness))
                 }
+                .mask(
+                    Group {
+                        if appDelegate.avoidMouse {
+                            Canvas { context, size in
+                                // Draw a full-screen white mask
+                                context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
+                                
+                                // Draw a "hole" at the mouse position
+                                let holeRadius: CGFloat = 60
+                                let holeRect = CGRect(
+                                    x: appDelegate.mouseLocation.x - holeRadius,
+                                    y: appDelegate.mouseLocation.y - holeRadius,
+                                    width: holeRadius * 2,
+                                    height: holeRadius * 2
+                                )
+                                
+                                // Use destinationOut to create a hole in the mask
+                                context.blendMode = .destinationOut
+                                context.fill(Path(ellipseIn: holeRect), with: .color(.white))
+                                // Add some blur to the hole for smoother transition
+                                context.addFilter(.blur(radius: 20))
+                            }
+                        } else {
+                            Rectangle().fill(Color.white)
+                        }
+                    }
+                )
             }
         }
         .ignoresSafeArea()
@@ -335,6 +405,19 @@ struct MenuBarControlView: View {
                 TemperatureSlider(value: $appDelegate.colorTemperature)
                 
                 ControlSlider(icon: "rectangle.expand.vertical", label: "Thickness", value: $appDelegate.ringThickness, range: 10...100, unit: "px")
+                
+                Toggle(isOn: $appDelegate.avoidMouse) {
+                    HStack {
+                        Image(systemName: "cursorarrow.and.square.on.square")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .frame(width: 18)
+                        Text("Avoid Mouse")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                }
+                .toggleStyle(.checkbox)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(16)
             
@@ -356,6 +439,6 @@ struct MenuBarControlView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14) // More balanced padding
         }
-        .frame(width: 260, height: 300)
+        .frame(width: 260, height: 340)
     }
 }
