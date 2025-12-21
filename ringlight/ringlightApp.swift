@@ -7,6 +7,8 @@
 
 import SwiftUI
 import AppKit
+import AVFoundation
+import CoreMediaIO
 
 @main
 struct ringlightApp: App {
@@ -33,9 +35,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var glowIntensity: CGFloat = 0.5
     @Published var isActive: Bool = true
     @Published var avoidMouse: Bool = true
-    @Published var margin: CGFloat = 0
+    @Published var showCameraPreview: Bool = false {
+        didSet {
+            if showCameraPreview {
+                startCamera()
+            } else {
+                stopCamera()
+            }
+            updatePopoverSize()
+        }
+    }
+    @Published var margin: CGFloat = 20
     @Published var mouseLocation: CGPoint = .zero
     @Published var isMouseOverRing: Bool = false
+    
+    var captureSession: AVCaptureSession?
     
     var ringColor: NSColor {
         temperatureToColor(colorTemperature)
@@ -55,6 +69,41 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             let b: CGFloat = 1.0
             return NSColor(red: r, green: g, blue: b, alpha: 1.0)
         }
+    }
+    
+    func startCamera() {
+        if captureSession != nil { return }
+        
+        let session = AVCaptureSession()
+        session.beginConfiguration()
+        
+        guard let device = AVCaptureDevice.default(for: .video),
+              let input = try? AVCaptureDeviceInput(device: device) else {
+            return
+        }
+        
+        if session.canAddInput(input) {
+            session.addInput(input)
+        }
+        
+        session.commitConfiguration()
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            session.startRunning()
+            DispatchQueue.main.async {
+                self.captureSession = session
+            }
+        }
+    }
+    
+    func stopCamera() {
+        captureSession?.stopRunning()
+        captureSession = nil
+    }
+    
+    func updatePopoverSize() {
+        let height: CGFloat = showCameraPreview ? 500 : 360
+        popover?.contentSize = NSSize(width: 260, height: height)
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -151,7 +200,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             button.target = self
         }
         popover = NSPopover()
-        popover?.contentSize = NSSize(width: 260, height: 340)
+        popover?.contentSize = NSSize(width: 260, height: 360)
         popover?.behavior = .transient
         popover?.contentViewController = NSHostingController(rootView: MenuBarControlView(appDelegate: self))
     }
@@ -378,11 +427,66 @@ extension RoundedRingShape {
     }
 }
 
+struct CameraPreviewView: NSViewRepresentable {
+    let session: AVCaptureSession?
+    
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.black.cgColor
+        view.layer?.cornerRadius = 8
+        view.layer?.masksToBounds = true
+        return view
+    }
+    
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if let session = session {
+            let existingLayer = nsView.layer?.sublayers?.first(where: { $0 is AVCaptureVideoPreviewLayer }) as? AVCaptureVideoPreviewLayer
+            if existingLayer == nil {
+                let layer = AVCaptureVideoPreviewLayer(session: session)
+                layer.videoGravity = .resizeAspectFill
+                layer.frame = nsView.bounds
+                
+                // Mirror the preview
+                if let connection = layer.connection {
+                    if connection.isVideoMirroringSupported {
+                        connection.automaticallyAdjustsVideoMirroring = false
+                        connection.isVideoMirrored = true
+                    }
+                }
+                
+                nsView.layer?.addSublayer(layer)
+            } else {
+                existingLayer?.frame = nsView.bounds
+                
+                // Ensure mirroring is maintained on update
+                if let connection = existingLayer?.connection {
+                    if connection.isVideoMirroringSupported {
+                        connection.automaticallyAdjustsVideoMirroring = false
+                        connection.isVideoMirrored = true
+                    }
+                }
+            }
+        } else {
+            nsView.layer?.sublayers?.forEach { if $0 is AVCaptureVideoPreviewLayer { $0.removeFromSuperlayer() } }
+        }
+    }
+}
+
 struct MenuBarControlView: View {
     @ObservedObject var appDelegate: AppDelegate
     
     var body: some View {
         VStack(spacing: 0) {
+            // Camera Preview
+            if appDelegate.showCameraPreview {
+                CameraPreviewView(session: appDelegate.captureSession)
+                    .frame(height: 140)
+                    .padding(12)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
+                Divider()
+            }
+            
             // Minimal Header
             HStack {
                 Text("Ring Light")
@@ -399,7 +503,7 @@ struct MenuBarControlView: View {
             Divider()
             
             // Controls - No Scroll
-            VStack(spacing: 20) {
+            VStack(spacing: 12) {
                 ControlSlider(icon: "sun.max", label: "Brightness", value: $appDelegate.brightness, range: 0.1...1.0, unit: "%")
                 
                 TemperatureSlider(value: $appDelegate.colorTemperature)
@@ -413,6 +517,21 @@ struct MenuBarControlView: View {
                         .frame(width: 18)
                     Text("Avoid Mouse")
                         .font(.system(size: 12, weight: .medium))
+                    Spacer()
+                }
+                
+                HStack(spacing: 8) {
+                    Toggle("", isOn: $appDelegate.showCameraPreview)
+                        .toggleStyle(.checkbox)
+                        .labelsHidden()
+                        .frame(width: 18)
+                    HStack(spacing: 4) {
+                        Text("Camera Preview")
+                            .font(.system(size: 12, weight: .medium))
+                        Image(systemName: "camera.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
                     Spacer()
                 }
             }
@@ -448,6 +567,6 @@ struct MenuBarControlView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14) // More balanced padding
         }
-        .frame(width: 260, height: 340)
+        .frame(width: 260, height: appDelegate.showCameraPreview ? 500 : 360)
     }
 }
