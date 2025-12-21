@@ -19,14 +19,7 @@ Apple recently introduced "Edge Light" in macOS Tahoe (26.2), but the feature is
 ---
 
 ## Screenshots
-
-[Insert Main App Screenshot Here]
-*The ring light in action: full-screen illumination with a transparent, click-through center.*
-
-### Menu Bar Controls
-[Insert Menu Bar Popover Screenshot Here]
-*Native control panel accessible directly from the macOS menu bar.*
-
+<img width="3024" height="1964" alt="image" src="https://github.com/user-attachments/assets/2e3ca99c-157f-4f08-9bbb-932030109c9e" />
 ---
 
 ## Features
@@ -57,6 +50,7 @@ Apple recently introduced "Edge Light" in macOS Tahoe (26.2), but the feature is
 ## Roadmap
 
 - [ ] **Face Tracking**: Dynamic dimming near the user's face using the Vision framework.
+- [ ] **Multi-Display Support**: Ability to choose the target display for the effect.
 - [ ] **Camera Activity Detection**: Auto-closing the ring light when no camera activity is detected to save resources (includes user alerts).
 - [ ] **App Integration**: Auto-activation when conferencing apps (Zoom, Teams) start.
 - [ ] **Preset Modes**: Quick settings for specific lighting conditions.
