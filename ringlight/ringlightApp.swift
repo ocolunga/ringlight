@@ -32,17 +32,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     
     @Published var ringThickness: CGFloat = 45
     @Published var colorTemperature: CGFloat = 0.5
-    var overlayCornerRadius: CGFloat {
-        guard let screen = overlayScreen ?? NSScreen.main else { return 200 }
-        // Tighter radius (17% of shorter dimension) for a squarer, more native shape
-        // with longer straight runs and curvature concentrated near the corners.
-        return min(screen.frame.width, screen.frame.height) * 0.17
-    }
+    // Outer CR scales with thickness so corners are tight at thin and round at thick,
+    // matching native behavior. Inner CR grows at a much lower rate so it stays squarer.
+    // outerCR = ringThickness × outerCRScale
+    // innerCR = outerCR × innerCRRatio  (capped at 20 minimum)
+    let outerCRScale: CGFloat = 1.0
+    let innerCRRatio: CGFloat = 0.7
     @Published var currentMonitorIndex: Int = 0
     @Published var isActive: Bool = true
     @Published var avoidMouse: Bool = true
     @Published var showCameraPreview: Bool = false
-    @Published var margin: CGFloat = 0
+    @Published var margin: CGFloat = 5
     @Published var mouseLocation: CGPoint = .zero
     @Published var isMouseOverRing: Bool = false
     
@@ -373,7 +373,6 @@ struct RingLightOverlay: View {
             if appDelegate.isActive {
                 ZStack {
                     let glowScale = min(geometry.size.width, geometry.size.height) / 800.0
-                    let cr = appDelegate.overlayCornerRadius
                     let menuBarH = getMenuBarHeight()
                     let T = appDelegate.ringThickness
                     let baseMargin = appDelegate.margin
@@ -382,7 +381,11 @@ struct RingLightOverlay: View {
                     // Core band — outer edge pinned at baseMargin, grows inward with thickness
                     let w2 = T * 0.55
                     let m2 = baseMargin
-                    let cr2 = cr
+
+                    // Corner radii scale with T: tight at thin, round at thick (native behavior).
+                    // Outer tracks T directly; inner grows at a lower rate so it stays squarer.
+                    let outerCR = max(T * appDelegate.outerCRScale, 50)
+                    let innerCR = max(outerCR * appDelegate.innerCRRatio, 50)
 
                     // Additive bloom stack: blurred copies of the core band summed with
                     // .plusLighter so light accumulates where it concentrates — the
@@ -394,19 +397,19 @@ struct RingLightOverlay: View {
                         (8, 0.70), (18, 0.58), (36, 0.46), (64, 0.34)
                     ]
                     ForEach(bloom.indices, id: \.self) { i in
-                        RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
+                        RoundedRingShape(thickness: w2, cornerRadius: outerCR, innerCornerRadius: innerCR, margin: m2, menuBarHeight: menuBarH)
                             .fill(color.opacity(bloom[i].opacity))
                             .blur(radius: bloom[i].blur * glowScale)
                             .blendMode(.plusLighter)
                     }
 
                     // Warm tint on the core face — 1pt blur regardless of screen size
-                    RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
+                    RoundedRingShape(thickness: w2, cornerRadius: outerCR, innerCornerRadius: innerCR, margin: m2, menuBarHeight: menuBarH)
                         .fill(color.opacity(0.95))
                         .blur(radius: 1.0)
 
                     // Bright white center — the "bulb"
-                    RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
+                    RoundedRingShape(thickness: w2, cornerRadius: outerCR, innerCornerRadius: innerCR, margin: m2, menuBarHeight: menuBarH)
                         .fill(Color.white.opacity(0.92))
                         .blur(radius: 1.0)
                 }
@@ -463,9 +466,10 @@ struct RingLightOverlay: View {
 struct RoundedRingShape: Shape {
     var thickness: CGFloat
     var cornerRadius: CGFloat
+    var innerCornerRadius: CGFloat
     var margin: CGFloat
     var menuBarHeight: CGFloat
-    
+
     func path(in rect: CGRect) -> Path {
         var path = Path()
         let outerRect = CGRect(
@@ -475,14 +479,13 @@ struct RoundedRingShape: Shape {
             height: rect.height - margin * 2 - menuBarHeight
         )
         path.addRoundedRect(in: outerRect, cornerSize: CGSize(width: cornerRadius, height: cornerRadius))
-        
+
         let innerRect = CGRect(
             x: rect.minX + margin + thickness,
             y: rect.minY + margin + thickness + menuBarHeight,
             width: rect.width - (margin + thickness) * 2,
             height: rect.height - (margin + thickness) * 2 - menuBarHeight
         )
-        let innerCornerRadius = max(cornerRadius - thickness * 0.6, 20)
         path.addRoundedRect(in: innerRect, cornerSize: CGSize(width: innerCornerRadius, height: innerCornerRadius))
         return path
     }
@@ -571,7 +574,7 @@ struct MenuBarControlView: View {
             
             // Controls - No Scroll
             VStack(spacing: 12) {
-                ControlSlider(icon: "sun.max.fill", label: "Thickness", value: $appDelegate.ringThickness, range: 10...200, unit: "px")
+                ControlSlider(icon: "sun.max.fill", label: "Thickness", value: $appDelegate.ringThickness, range: 15...190, unit: "px")
 
                 TemperatureSlider(value: $appDelegate.colorTemperature)
 
