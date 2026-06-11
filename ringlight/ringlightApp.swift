@@ -46,7 +46,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
 
     let mouseTracker = MouseTracker()
 
-    var captureSession: AVCaptureSession?
+    @Published var captureSession: AVCaptureSession?
     
     var ringColor: NSColor {
         temperatureToColor(colorTemperature)
@@ -481,46 +481,41 @@ extension RoundedRingShape {
     }
 }
 
+class CameraContainerView: NSView {
+    override func layout() {
+        super.layout()
+        // Keep the preview layer filling the view regardless of when it was added.
+        layer?.sublayers?.forEach { $0.frame = bounds }
+    }
+}
+
 struct CameraPreviewView: NSViewRepresentable {
     let session: AVCaptureSession?
-    
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
+
+    func makeNSView(context: Context) -> CameraContainerView {
+        let view = CameraContainerView()
         view.wantsLayer = true
         view.layer?.backgroundColor = NSColor.black.cgColor
         view.layer?.cornerRadius = 8
         view.layer?.masksToBounds = true
         return view
     }
-    
-    func updateNSView(_ nsView: NSView, context: Context) {
+
+    func updateNSView(_ nsView: CameraContainerView, context: Context) {
         if let session = session {
-            let existingLayer = nsView.layer?.sublayers?.first(where: { $0 is AVCaptureVideoPreviewLayer }) as? AVCaptureVideoPreviewLayer
-            if existingLayer == nil {
-                let layer = AVCaptureVideoPreviewLayer(session: session)
-                layer.videoGravity = .resizeAspectFill
-                layer.frame = nsView.bounds
-                
-                // Mirror the preview
-                if let connection = layer.connection {
-                    if connection.isVideoMirroringSupported {
-                        connection.automaticallyAdjustsVideoMirroring = false
-                        connection.isVideoMirrored = true
-                    }
-                }
-                
-                nsView.layer?.addSublayer(layer)
-            } else {
-                existingLayer?.frame = nsView.bounds
-                
-                // Ensure mirroring is maintained on update
-                if let connection = existingLayer?.connection {
-                    if connection.isVideoMirroringSupported {
-                        connection.automaticallyAdjustsVideoMirroring = false
-                        connection.isVideoMirrored = true
-                    }
-                }
+            guard nsView.layer?.sublayers?.contains(where: { $0 is AVCaptureVideoPreviewLayer }) != true else { return }
+            let previewLayer = AVCaptureVideoPreviewLayer(session: session)
+            previewLayer.videoGravity = .resizeAspectFill
+            previewLayer.frame = nsView.bounds
+            if let connection = previewLayer.connection, connection.isVideoMirroringSupported {
+                connection.automaticallyAdjustsVideoMirroring = false
+                connection.isVideoMirrored = true
             }
+            nsView.layer?.addSublayer(previewLayer)
+            // Bounds may not have settled yet when the session arrives (intrinsic-size
+            // popover defers layout). Nudge layout on the next run loop cycle so
+            // CameraContainerView.layout() runs with the final bounds.
+            DispatchQueue.main.async { [weak nsView] in nsView?.needsLayout = true }
         } else {
             nsView.layer?.sublayers?.forEach { if $0 is AVCaptureVideoPreviewLayer { $0.removeFromSuperlayer() } }
         }
