@@ -43,10 +43,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     @Published var avoidMouse: Bool = true
     @Published var showCameraPreview: Bool = false
     @Published var margin: CGFloat = 5
-    @Published var mouseLocation: CGPoint = .zero
-    @Published var isMouseOverRing: Bool = false
-    
-    var captureSession: AVCaptureSession?
+
+    let mouseTracker = MouseTracker()
+
+    @Published var captureSession: AVCaptureSession?
     
     var ringColor: NSColor {
         temperatureToColor(colorTemperature)
@@ -96,10 +96,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     func stopCamera() {
         captureSession?.stopRunning()
         captureSession = nil
-    }
-    
-    func updatePopoverSize() {
-        popover?.contentSize = NSSize(width: 260, height: 500)
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -155,7 +151,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
             x: location.x - windowFrame.origin.x,
             y: windowFrame.height - (location.y - windowFrame.origin.y)
         )
-        if mouseLocation != converted { mouseLocation = converted }
+        if mouseTracker.location != converted { mouseTracker.location = converted }
     }
     
     func createOverlayWindow() {
@@ -177,17 +173,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
-        let hostingView = NSHostingView(rootView: RingLightOverlay(appDelegate: self))
+        let hostingView = NSHostingView(rootView: RingLightOverlay(appDelegate: self, mouseTracker: mouseTracker))
         hostingView.frame = CGRect(origin: .zero, size: fullFrame.size)
         hostingView.wantsLayer = true
         window.contentView = hostingView
-        let anim = CABasicAnimation(keyPath: "opacity")
-        anim.fromValue = 1.0
-        anim.toValue = 0.9999
-        anim.duration = 1.0
-        anim.repeatCount = .greatestFiniteMagnitude
-        anim.autoreverses = true
-        hostingView.layer?.add(anim, forKey: "keepAlive")
         window.orderFrontRegardless()
     }
     
@@ -228,16 +217,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
             button.target = self
         }
         popover = NSPopover()
-        popover?.contentSize = NSSize(width: 260, height: 500)
         popover?.behavior = .transient
         popover?.delegate = self
-        popover?.contentViewController = NSHostingController(rootView: MenuBarControlView(appDelegate: self))
+        let controller = NSHostingController(rootView: MenuBarControlView(appDelegate: self))
+        controller.sizingOptions = .intrinsicContentSize
+        popover?.contentViewController = controller
     }
     
     func popoverWillShow(_ notification: Notification) {
         showCameraPreview = true
         startCamera()
-        updatePopoverSize()
     }
     
     func popoverDidClose(_ notification: Notification) {
@@ -273,6 +262,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
 class OverlayWindow: NSWindow {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+}
+
+class MouseTracker: ObservableObject {
+    @Published var location: CGPoint = .zero
 }
 
 // MARK: - Components
@@ -321,7 +314,7 @@ struct TemperatureSlider: View {
             
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 6)
+                    Capsule()
                         .fill(
                             LinearGradient(
                                 colors: [
@@ -367,7 +360,8 @@ struct TemperatureSlider: View {
 // MARK: - Views
 struct RingLightOverlay: View {
     @ObservedObject var appDelegate: AppDelegate
-    
+    @ObservedObject var mouseTracker: MouseTracker
+
     var body: some View {
         GeometryReader { geometry in
             if appDelegate.isActive {
@@ -378,23 +372,15 @@ struct RingLightOverlay: View {
                     let baseMargin = appDelegate.margin
                     let color = Color(nsColor: appDelegate.ringColor)
 
-                    // Core band — outer edge pinned at baseMargin, grows inward with thickness
                     let w2 = T * 0.55
                     let m2 = baseMargin
 
-                    // Corner radii scale with T: tight at thin, round at thick (native behavior).
-                    // Outer tracks T directly; inner grows at a lower rate so it stays squarer.
                     let outerCR = max(T * appDelegate.outerCRScale, 50)
                     let innerCR = max(outerCR * appDelegate.innerCRRatio, 50)
 
-                    // Additive bloom stack: blurred copies of the core band summed with
-                    // .plusLighter so light accumulates where it concentrates — the
-                    // convex corner outer bleed and overlapping inner/outer tails get
-                    // brighter, straight runs stay even. This produces the cumulative
-                    // (non-flat) glow of the native Edge Light. The .compositingGroup()
-                    // keeps the additive math contained, then composites over the desktop.
+                    // Two bloom passes instead of four — same additive glow, half the offscreen buffers.
                     let bloom: [(blur: CGFloat, opacity: CGFloat)] = [
-                        (8, 0.70), (18, 0.58), (36, 0.46), (64, 0.34)
+                        (8, 0.75), (22, 0.55)
                     ]
                     ForEach(bloom.indices, id: \.self) { i in
                         RoundedRingShape(thickness: w2, cornerRadius: outerCR, innerCornerRadius: innerCR, margin: m2, menuBarHeight: menuBarH)
@@ -403,16 +389,17 @@ struct RingLightOverlay: View {
                             .blendMode(.plusLighter)
                     }
 
-                    // Warm tint on the core face — 1pt blur regardless of screen size
                     RoundedRingShape(thickness: w2, cornerRadius: outerCR, innerCornerRadius: innerCR, margin: m2, menuBarHeight: menuBarH)
                         .fill(color.opacity(0.95))
                         .blur(radius: 1.0)
 
-                    // Bright white center — the "bulb"
                     RoundedRingShape(thickness: w2, cornerRadius: outerCR, innerCornerRadius: innerCR, margin: m2, menuBarHeight: menuBarH)
                         .fill(Color.white.opacity(0.92))
                         .blur(radius: 1.0)
                 }
+                // Flatten all bloom layers into one Metal texture before masking,
+                // reducing live compositor layer count from 4+ to 1.
+                .drawingGroup()
                 .compositingGroup()
                 .mask(
                     Group {
@@ -420,12 +407,9 @@ struct RingLightOverlay: View {
                             Canvas { context, size in
                                 context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
 
-                                // Scale radii with screen diagonal so the effect is
-                                // proportionally larger on bigger displays.
                                 let diag = sqrt(size.width * size.width + size.height * size.height)
                                 let outerRadius = diag * 0.067
-                                let innerRadius = outerRadius * 0.5
-                                let center = appDelegate.mouseLocation
+                                let center = mouseTracker.location
 
                                 context.blendMode = .destinationOut
                                 context.fill(
@@ -497,46 +481,41 @@ extension RoundedRingShape {
     }
 }
 
+class CameraContainerView: NSView {
+    override func layout() {
+        super.layout()
+        // Keep the preview layer filling the view regardless of when it was added.
+        layer?.sublayers?.forEach { $0.frame = bounds }
+    }
+}
+
 struct CameraPreviewView: NSViewRepresentable {
     let session: AVCaptureSession?
-    
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
+
+    func makeNSView(context: Context) -> CameraContainerView {
+        let view = CameraContainerView()
         view.wantsLayer = true
         view.layer?.backgroundColor = NSColor.black.cgColor
         view.layer?.cornerRadius = 8
         view.layer?.masksToBounds = true
         return view
     }
-    
-    func updateNSView(_ nsView: NSView, context: Context) {
+
+    func updateNSView(_ nsView: CameraContainerView, context: Context) {
         if let session = session {
-            let existingLayer = nsView.layer?.sublayers?.first(where: { $0 is AVCaptureVideoPreviewLayer }) as? AVCaptureVideoPreviewLayer
-            if existingLayer == nil {
-                let layer = AVCaptureVideoPreviewLayer(session: session)
-                layer.videoGravity = .resizeAspectFill
-                layer.frame = nsView.bounds
-                
-                // Mirror the preview
-                if let connection = layer.connection {
-                    if connection.isVideoMirroringSupported {
-                        connection.automaticallyAdjustsVideoMirroring = false
-                        connection.isVideoMirrored = true
-                    }
-                }
-                
-                nsView.layer?.addSublayer(layer)
-            } else {
-                existingLayer?.frame = nsView.bounds
-                
-                // Ensure mirroring is maintained on update
-                if let connection = existingLayer?.connection {
-                    if connection.isVideoMirroringSupported {
-                        connection.automaticallyAdjustsVideoMirroring = false
-                        connection.isVideoMirrored = true
-                    }
-                }
+            guard nsView.layer?.sublayers?.contains(where: { $0 is AVCaptureVideoPreviewLayer }) != true else { return }
+            let previewLayer = AVCaptureVideoPreviewLayer(session: session)
+            previewLayer.videoGravity = .resizeAspectFill
+            previewLayer.frame = nsView.bounds
+            if let connection = previewLayer.connection, connection.isVideoMirroringSupported {
+                connection.automaticallyAdjustsVideoMirroring = false
+                connection.isVideoMirrored = true
             }
+            nsView.layer?.addSublayer(previewLayer)
+            // Bounds may not have settled yet when the session arrives (intrinsic-size
+            // popover defers layout). Nudge layout on the next run loop cycle so
+            // CameraContainerView.layout() runs with the final bounds.
+            DispatchQueue.main.async { [weak nsView] in nsView?.needsLayout = true }
         } else {
             nsView.layer?.sublayers?.forEach { if $0 is AVCaptureVideoPreviewLayer { $0.removeFromSuperlayer() } }
         }
@@ -629,6 +608,6 @@ struct MenuBarControlView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14) // More balanced padding
         }
-        .frame(width: 260, height: 500)
+        .frame(width: 260)
     }
 }
