@@ -234,7 +234,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
         let hostingView = NSHostingView(rootView: RingLightOverlay(appDelegate: self))
         hostingView.frame = CGRect(origin: .zero, size: fullFrame.size)
+        hostingView.wantsLayer = true
         window.contentView = hostingView
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = 1.0
+        anim.toValue = 0.9999
+        anim.duration = 1.0
+        anim.repeatCount = .greatestFiniteMagnitude
+        anim.autoreverses = true
+        hostingView.layer?.add(anim, forKey: "keepAlive")
         window.orderFrontRegardless()
     }
     
