@@ -69,6 +69,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     var popover: NSPopover?
     var mouseMonitor: Any?
     var localMouseMonitor: Any?
+    var overlayScreen: NSScreen?
     
     @Published var ringThickness: CGFloat = 45
     @Published var brightness: CGFloat = 1.0 {
@@ -77,7 +78,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
         }
     }
     @Published var colorTemperature: CGFloat = 0.5
-    let cornerRadius: CGFloat = 40 // Default fixed roundness
+    var overlayCornerRadius: CGFloat {
+        guard let screen = overlayScreen ?? NSScreen.main else { return 200 }
+        // Use 30% of the shorter dimension so the ring looks oval on all displays.
+        return min(screen.frame.width, screen.frame.height) * 0.30
+    }
     @Published var glowIntensity: CGFloat = 0.5
     @Published var isActive: Bool = true
     @Published var avoidMouse: Bool = true
@@ -151,26 +156,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Match app brightness to system brightness on launch
         self.brightness = CGFloat(getSystemBrightness())
-        
-        // Hide dock icon - make it a pure menu bar app
         NSApp.setActivationPolicy(.accessory)
-        
         NSApplication.shared.windows.forEach { $0.close() }
         createOverlayWindow()
         createMenuBarIcon()
         setupGlobalKeyboardShortcuts()
         setupMouseTracking()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screensDidChange),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+    }
+
+    @objc func screensDidChange() {
+        guard let newMain = NSScreen.main, newMain.frame != overlayScreen?.frame else { return }
+        overlayWindow?.close()
+        overlayWindow = nil
+        createOverlayWindow()
     }
     
     func setupMouseTracking() {
-        // Track mouse globally
-        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+        let dragEvents: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: dragEvents) { [weak self] _ in
             self?.updateMouseLocation()
         }
-        // Also track locally for when the app is active
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: dragEvents) { [weak self] event in
             self?.updateMouseLocation()
             return event
         }
@@ -187,22 +200,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     
     func updateMouseLocation() {
         let location = NSEvent.mouseLocation
-        guard let screen = NSScreen.main else { return }
-        
-        // Convert from screen coordinates (bottom-left) to SwiftUI (top-left)
-        let screenFrame = screen.frame
-        let convertedLocation = CGPoint(
-            x: location.x - screenFrame.origin.x,
-            y: screenFrame.height - (location.y - screenFrame.origin.y)
+        guard let windowFrame = overlayWindow?.frame else { return }
+
+        let converted = CGPoint(
+            x: location.x - windowFrame.origin.x,
+            y: windowFrame.height - (location.y - windowFrame.origin.y)
         )
-        
-        if self.mouseLocation != convertedLocation {
-            self.mouseLocation = convertedLocation
-        }
+        if mouseLocation != converted { mouseLocation = converted }
     }
     
     func createOverlayWindow() {
         guard let screen = NSScreen.main else { return }
+        overlayScreen = screen
         let fullFrame = screen.frame
         overlayWindow = OverlayWindow(
             contentRect: fullFrame,
@@ -211,7 +220,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
             defer: false
         )
         guard let window = overlayWindow else { return }
-        window.level = .floating
+        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) + 1)
         window.backgroundColor = .clear
         window.isOpaque = false
         window.hasShadow = false
@@ -391,49 +400,85 @@ struct RingLightOverlay: View {
         GeometryReader { geometry in
             if appDelegate.isActive {
                 ZStack {
+                    // Scale glow with the shorter screen dimension so it spreads
+                    // proportionally on large displays.
+                    let glowScale = min(geometry.size.width, geometry.size.height) / 800.0
+                    let blurRadii: [CGFloat]         = [15 * glowScale, 50 * glowScale, 110 * glowScale]
+                    let thicknessAdds: [CGFloat]     = [0,  28 * glowScale,  65 * glowScale]
+
+                    let cr = appDelegate.overlayCornerRadius
+                    let menuBarH = getMenuBarHeight()
+                    let opacityFactors: [Double] = [0.8, 0.5, 0.3]
+
+                    // Glow layers: tone color spreading both inward and outward from ring
                     ForEach(0..<3) { layer in
                         RoundedRingShape(
-                            thickness: appDelegate.ringThickness + CGFloat(layer) * 12,
-                            cornerRadius: appDelegate.cornerRadius,
+                            thickness: appDelegate.ringThickness + thicknessAdds[layer],
+                            cornerRadius: cr,
                             margin: appDelegate.margin,
-                            menuBarHeight: getMenuBarHeight()
+                            menuBarHeight: menuBarH
                         )
                         .fill(
                             Color(nsColor: appDelegate.ringColor)
-                                .opacity(appDelegate.brightness * appDelegate.glowIntensity / Double(layer + 2))
+                                .opacity(appDelegate.brightness * appDelegate.glowIntensity * opacityFactors[layer])
                         )
-                        .blur(radius: CGFloat(layer + 1) * 8)
+                        .blur(radius: blurRadii[layer])
                     }
-                    
+
+                    // Solid tone ring — colored edges
                     RoundedRingShape(
                         thickness: appDelegate.ringThickness,
-                        cornerRadius: appDelegate.cornerRadius,
+                        cornerRadius: cr,
                         margin: appDelegate.margin,
-                        menuBarHeight: getMenuBarHeight()
+                        menuBarHeight: menuBarH
                     )
                     .fill(Color(nsColor: appDelegate.ringColor).opacity(appDelegate.brightness))
+
+                    // Bright center stripe — makes the middle of the ring appear whiter/brighter,
+                    // leaving tone color visible only at the inner and outer edges.
+                    let centerWidth = appDelegate.ringThickness * 0.5
+                    let centerMargin = appDelegate.margin + (appDelegate.ringThickness - centerWidth) / 2
+                    RoundedRingShape(
+                        thickness: centerWidth,
+                        cornerRadius: cr,
+                        margin: centerMargin,
+                        menuBarHeight: menuBarH
+                    )
+                    .fill(Color.white.opacity(appDelegate.brightness * 0.85))
+                    .blur(radius: 4)
                 }
                 .mask(
                     Group {
                         if appDelegate.avoidMouse {
                             Canvas { context, size in
-                                // Draw a full-screen white mask
                                 context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
-                                
-                                // Draw a "hole" at the mouse position
-                                let holeRadius: CGFloat = 60
-                                let holeRect = CGRect(
-                                    x: appDelegate.mouseLocation.x - holeRadius,
-                                    y: appDelegate.mouseLocation.y - holeRadius,
-                                    width: holeRadius * 2,
-                                    height: holeRadius * 2
-                                )
-                                
-                                // Use destinationOut to create a hole in the mask
+
+                                // Scale radii with screen diagonal so the effect is
+                                // proportionally larger on bigger displays.
+                                let diag = sqrt(size.width * size.width + size.height * size.height)
+                                let outerRadius = diag * 0.067
+                                let innerRadius = outerRadius * 0.5
+                                let center = appDelegate.mouseLocation
+
                                 context.blendMode = .destinationOut
-                                context.fill(Path(ellipseIn: holeRect), with: .color(.white))
-                                // Add some blur to the hole for smoother transition
-                                context.addFilter(.blur(radius: 20))
+                                context.fill(
+                                    Path(ellipseIn: CGRect(
+                                        x: center.x - outerRadius,
+                                        y: center.y - outerRadius,
+                                        width: outerRadius * 2,
+                                        height: outerRadius * 2
+                                    )),
+                                    with: .radialGradient(
+                                        Gradient(stops: [
+                                            .init(color: .white, location: 0),
+                                            .init(color: .white, location: 0.5),
+                                            .init(color: .clear, location: 1)
+                                        ]),
+                                        center: center,
+                                        startRadius: 0,
+                                        endRadius: outerRadius
+                                    )
+                                )
                             }
                         } else {
                             Rectangle().fill(Color.white)
@@ -446,7 +491,7 @@ struct RingLightOverlay: View {
     }
     
     func getMenuBarHeight() -> CGFloat {
-        guard let screen = NSScreen.main else { return 25 }
+        guard let screen = appDelegate.overlayScreen ?? NSScreen.main else { return 25 }
         let height = screen.frame.height - screen.visibleFrame.height - screen.visibleFrame.origin.y
         return max(height, 0)
     }
