@@ -1,6 +1,6 @@
 //
-//  ringlightApp.swift
-//  ringlight
+//  RimLightApp.swift
+//  RimLight
 //
 //  Created by Om Sarraf on 20/12/25.
 //
@@ -53,7 +53,7 @@ class BrightnessControl {
 }
 
 @main
-struct ringlightApp: App {
+struct RimLightApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
@@ -598,7 +598,7 @@ struct MenuBarControlView: View {
             
             // Minimal Header
             HStack {
-                Text("Ring Light")
+                Text("RimLight")
                     .font(.system(size: 13, weight: .bold))
                 Spacer()
                 Toggle("", isOn: $appDelegate.isActive)
@@ -655,7 +655,7 @@ struct MenuBarControlView: View {
             // Minimal Footer
             HStack(spacing: 12) {
                 Button(action: {
-                    if let url = URL(string: "https://github.com/itsOmSarraf/ringlight") {
+                    if let url = URL(string: "https://github.com/ocolunga/rimlight") {
                         NSWorkspace.shared.open(url)
                     }
                 }) {
