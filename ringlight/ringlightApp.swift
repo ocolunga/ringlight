@@ -403,19 +403,26 @@ struct RingLightOverlay: View {
                     // Scale glow with the shorter screen dimension so it spreads
                     // proportionally on large displays.
                     let glowScale = min(geometry.size.width, geometry.size.height) / 800.0
-                    let blurRadii: [CGFloat]         = [15 * glowScale, 50 * glowScale, 110 * glowScale]
-                    let thicknessAdds: [CGFloat]     = [0,  28 * glowScale,  65 * glowScale]
+                    let blurRadii: [CGFloat]         = [2 * glowScale, 4 * glowScale, 8 * glowScale]
 
                     let cr = appDelegate.overlayCornerRadius
                     let menuBarH = getMenuBarHeight()
                     let opacityFactors: [Double] = [0.8, 0.5, 0.3]
 
-                    // Glow layers: tone color spreading both inward and outward from ring
+                    // The colored strip lives only at the inner edge of the ring band.
+                    let innerEdgeWidth: CGFloat = 6
+                    let innerEdgeMargin = appDelegate.margin + appDelegate.ringThickness - innerEdgeWidth
+                    // Corner radius at the inner-edge position (matches what RoundedRingShape
+                    // would compute for the outer rect at this inset depth).
+                    let innerEdgeCR = max(cr - (appDelegate.ringThickness - innerEdgeWidth) * 0.6, 20)
+
+                    // Glow layers: emanate from the inner-edge strip with the correct corner
+                    // radius for that position so the halo follows the ring curve.
                     ForEach(0..<3) { layer in
                         RoundedRingShape(
-                            thickness: appDelegate.ringThickness + thicknessAdds[layer],
-                            cornerRadius: cr,
-                            margin: appDelegate.margin,
+                            thickness: innerEdgeWidth,
+                            cornerRadius: innerEdgeCR,
+                            margin: innerEdgeMargin,
                             menuBarHeight: menuBarH
                         )
                         .fill(
@@ -434,10 +441,10 @@ struct RingLightOverlay: View {
                     )
                     .fill(Color(nsColor: appDelegate.ringColor).opacity(appDelegate.brightness))
 
-                    // Bright center stripe — makes the middle of the ring appear whiter/brighter,
-                    // leaving tone color visible only at the inner and outer edges.
-                    let centerWidth = appDelegate.ringThickness * 0.5
-                    let centerMargin = appDelegate.margin + (appDelegate.ringThickness - centerWidth) / 2
+                    // White covering — starts from outer edge of ring, leaves innerEdgeWidth
+                    // of tone color visible only at the inner edge (screen-center side).
+                    let centerWidth = appDelegate.ringThickness - innerEdgeWidth
+                    let centerMargin = appDelegate.margin
                     RoundedRingShape(
                         thickness: centerWidth,
                         cornerRadius: cr,
