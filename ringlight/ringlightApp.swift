@@ -87,7 +87,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     @Published var isActive: Bool = true
     @Published var avoidMouse: Bool = true
     @Published var showCameraPreview: Bool = false
-    @Published var margin: CGFloat = 20
+    @Published var margin: CGFloat = 0
     @Published var mouseLocation: CGPoint = .zero
     @Published var isMouseOverRing: Bool = false
     
@@ -400,52 +400,39 @@ struct RingLightOverlay: View {
         GeometryReader { geometry in
             if appDelegate.isActive {
                 ZStack {
-                    // Scale glow with the shorter screen dimension so it spreads
-                    // proportionally on large displays.
                     let glowScale = min(geometry.size.width, geometry.size.height) / 800.0
-                    let blurRadii: [CGFloat]         = [15 * glowScale, 50 * glowScale, 110 * glowScale]
-                    let thicknessAdds: [CGFloat]     = [0,  28 * glowScale,  65 * glowScale]
-
                     let cr = appDelegate.overlayCornerRadius
                     let menuBarH = getMenuBarHeight()
-                    let opacityFactors: [Double] = [0.8, 0.5, 0.3]
+                    let T = appDelegate.ringThickness
+                    let b = appDelegate.brightness
+                    let baseMargin = appDelegate.margin
+                    let color = Color(nsColor: appDelegate.ringColor)
 
-                    // Glow layers: tone color spreading both inward and outward from ring
-                    ForEach(0..<3) { layer in
-                        RoundedRingShape(
-                            thickness: appDelegate.ringThickness + thicknessAdds[layer],
-                            cornerRadius: cr,
-                            margin: appDelegate.margin,
-                            menuBarHeight: menuBarH
-                        )
-                        .fill(
-                            Color(nsColor: appDelegate.ringColor)
-                                .opacity(appDelegate.brightness * appDelegate.glowIntensity * opacityFactors[layer])
-                        )
-                        .blur(radius: blurRadii[layer])
-                    }
+                    // White core — this is what grows with thickness
+                    let w2 = T * 0.65
+                    let m2 = baseMargin + (T - w2) / 2
+                    let cr2 = max(cr - (T - w2) / 2 * 0.6, 20)
 
-                    // Solid tone ring — colored edges
-                    RoundedRingShape(
-                        thickness: appDelegate.ringThickness,
-                        cornerRadius: cr,
-                        margin: appDelegate.margin,
-                        menuBarHeight: menuBarH
-                    )
-                    .fill(Color(nsColor: appDelegate.ringColor).opacity(appDelegate.brightness))
+                    // Amber fringe — narrow fixed border on each side of the white core, capped at 25px
+                    let amberBorder: CGFloat = min(T * 0.18, 25)
+                    let w0 = min(w2 + amberBorder * 2, T)
+                    let m0 = baseMargin + (T - w0) / 2
+                    let cr0 = max(cr - (T - w0) / 2 * 0.6, 20)
 
-                    // Bright center stripe — makes the middle of the ring appear whiter/brighter,
-                    // leaving tone color visible only at the inner and outer edges.
-                    let centerWidth = appDelegate.ringThickness * 0.5
-                    let centerMargin = appDelegate.margin + (appDelegate.ringThickness - centerWidth) / 2
-                    RoundedRingShape(
-                        thickness: centerWidth,
-                        cornerRadius: cr,
-                        margin: centerMargin,
-                        menuBarHeight: menuBarH
-                    )
-                    .fill(Color.white.opacity(appDelegate.brightness * 0.85))
-                    .blur(radius: 4)
+                    // Layer 0: amber fringe wrapping the white core
+                    RoundedRingShape(thickness: w0, cornerRadius: cr0, margin: m0, menuBarHeight: menuBarH)
+                        .fill(color.opacity(b * 0.85))
+                        .blur(radius: amberBorder * 0.6 * glowScale)
+
+                    // Layer 1: warm color on core face — 1pt blur regardless of screen size
+                    RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
+                        .fill(color.opacity(b * 0.95))
+                        .blur(radius: 1.0)
+
+                    // Layer 2: bright white core — nearly sharp
+                    RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
+                        .fill(Color.white.opacity(b * 0.92))
+                        .blur(radius: 1.0)
                 }
                 .mask(
                     Group {
@@ -612,7 +599,7 @@ struct MenuBarControlView: View {
                 
                 TemperatureSlider(value: $appDelegate.colorTemperature)
                 
-                ControlSlider(icon: "rectangle.expand.vertical", label: "Thickness", value: $appDelegate.ringThickness, range: 10...100, unit: "px")
+                ControlSlider(icon: "rectangle.expand.vertical", label: "Thickness", value: $appDelegate.ringThickness, range: 10...200, unit: "px")
                 
                 HStack(spacing: 8) {
                     Toggle("", isOn: $appDelegate.avoidMouse)
