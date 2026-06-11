@@ -83,6 +83,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
         // Use 30% of the shorter dimension so the ring looks oval on all displays.
         return min(screen.frame.width, screen.frame.height) * 0.30
     }
+    @Published var currentMonitorIndex: Int = 0
     @Published var glowIntensity: CGFloat = 0.5
     @Published var isActive: Bool = true
     @Published var avoidMouse: Bool = true
@@ -172,8 +173,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     }
 
     @objc func screensDidChange() {
-        guard let newMain = NSScreen.main, newMain.frame != overlayScreen?.frame else { return }
-        overlayWindow?.close()
+        let screens = NSScreen.screens
+        if currentMonitorIndex >= screens.count {
+            currentMonitorIndex = max(0, screens.count - 1)
+        }
+        overlayWindow?.orderOut(nil)
         overlayWindow = nil
         createOverlayWindow()
     }
@@ -210,7 +214,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     }
     
     func createOverlayWindow() {
-        guard let screen = NSScreen.main else { return }
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return }
+        let screen = screens[min(currentMonitorIndex, screens.count - 1)]
         overlayScreen = screen
         let fullFrame = screen.frame
         overlayWindow = OverlayWindow(
@@ -227,11 +233,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
         window.ignoresMouseEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
         let hostingView = NSHostingView(rootView: RingLightOverlay(appDelegate: self))
-        hostingView.frame = fullFrame
+        hostingView.frame = CGRect(origin: .zero, size: fullFrame.size)
         window.contentView = hostingView
         window.orderFrontRegardless()
     }
     
+    func switchMonitor() {
+        let screens = NSScreen.screens
+        guard screens.count > 1 else { return }
+        let newIndex = (currentMonitorIndex + 1) % screens.count
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.overlayWindow?.orderOut(nil)
+            self.overlayWindow = nil
+            self.currentMonitorIndex = newIndex
+            self.createOverlayWindow()
+        }
+    }
+
     func createMenuBarIcon() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
@@ -479,8 +498,7 @@ struct RingLightOverlay: View {
     
     func getMenuBarHeight() -> CGFloat {
         guard let screen = appDelegate.overlayScreen ?? NSScreen.main else { return 25 }
-        let height = screen.frame.height - screen.visibleFrame.height - screen.visibleFrame.origin.y
-        return max(height, 0)
+        return max(screen.frame.maxY - screen.visibleFrame.maxY, 0)
     }
 }
 
@@ -609,6 +627,25 @@ struct MenuBarControlView: View {
                     Text("Avoid Mouse")
                         .font(.system(size: 12, weight: .medium))
                     Spacer()
+                }
+
+                let screenCount = NSScreen.screens.count
+                if screenCount > 1 {
+                    HStack(spacing: 8) {
+                        Image(systemName: "display.2")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .frame(width: 18)
+                        Text("Monitor \(appDelegate.currentMonitorIndex + 1) of \(screenCount)")
+                            .font(.system(size: 12, weight: .medium))
+                        Spacer()
+                        Button("Switch") {
+                            appDelegate.switchMonitor()
+                        }
+                        .font(.system(size: 11))
+                        .buttonStyle(.plain)
+                        .foregroundColor(.accentColor)
+                    }
                 }
             }
             .padding(16)
