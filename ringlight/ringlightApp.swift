@@ -11,47 +11,6 @@ import AVFoundation
 import CoreMediaIO
 import CoreGraphics
 
-// Brightness control helper using dynamic loading
-class BrightnessControl {
-    typealias SetBrightnessFunc = @convention(c) (CGDirectDisplayID, Float) -> Int32
-    typealias GetBrightnessFunc = @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<Float>) -> Int32
-    
-    private static var setBrightnessFunc: SetBrightnessFunc?
-    private static var getBrightnessFunc: GetBrightnessFunc?
-    private static var isLoaded = false
-    
-    static func loadDisplayServices() {
-        guard !isLoaded else { return }
-        isLoaded = true
-        
-        let handle = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_NOW)
-        if handle != nil {
-            if let setBrightness = dlsym(handle, "DisplayServicesSetBrightness") {
-                setBrightnessFunc = unsafeBitCast(setBrightness, to: SetBrightnessFunc.self)
-            }
-            if let getBrightness = dlsym(handle, "DisplayServicesGetBrightness") {
-                getBrightnessFunc = unsafeBitCast(getBrightness, to: GetBrightnessFunc.self)
-            }
-        }
-    }
-    
-    static func setBrightness(_ level: Float) {
-        loadDisplayServices()
-        if let setFunc = setBrightnessFunc {
-            _ = setFunc(CGMainDisplayID(), level)
-        }
-    }
-    
-    static func getBrightness() -> Float {
-        loadDisplayServices()
-        var level: Float = 1.0
-        if let getFunc = getBrightnessFunc {
-            _ = getFunc(CGMainDisplayID(), &level)
-        }
-        return level
-    }
-}
-
 @main
 struct RimLightApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -72,19 +31,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     var overlayScreen: NSScreen?
     
     @Published var ringThickness: CGFloat = 45
-    @Published var brightness: CGFloat = 1.0 {
-        didSet {
-            setSystemBrightness(Float(brightness))
-        }
-    }
     @Published var colorTemperature: CGFloat = 0.5
     var overlayCornerRadius: CGFloat {
         guard let screen = overlayScreen ?? NSScreen.main else { return 200 }
-        // Use 30% of the shorter dimension so the ring looks oval on all displays.
-        return min(screen.frame.width, screen.frame.height) * 0.30
+        // Tighter radius (17% of shorter dimension) for a squarer, more native shape
+        // with longer straight runs and curvature concentrated near the corners.
+        return min(screen.frame.width, screen.frame.height) * 0.17
     }
     @Published var currentMonitorIndex: Int = 0
-    @Published var glowIntensity: CGFloat = 0.5
     @Published var isActive: Bool = true
     @Published var avoidMouse: Bool = true
     @Published var showCameraPreview: Bool = false
@@ -148,16 +102,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
         popover?.contentSize = NSSize(width: 260, height: 500)
     }
     
-    func setSystemBrightness(_ level: Float) {
-        BrightnessControl.setBrightness(level)
-    }
-    
-    func getSystemBrightness() -> Float {
-        return BrightnessControl.getBrightness()
-    }
-    
     func applicationDidFinishLaunching(_ notification: Notification) {
-        self.brightness = CGFloat(getSystemBrightness())
         NSApp.setActivationPolicy(.accessory)
         NSApplication.shared.windows.forEach { $0.close() }
         createOverlayWindow()
@@ -431,36 +376,41 @@ struct RingLightOverlay: View {
                     let cr = appDelegate.overlayCornerRadius
                     let menuBarH = getMenuBarHeight()
                     let T = appDelegate.ringThickness
-                    let b = appDelegate.brightness
                     let baseMargin = appDelegate.margin
                     let color = Color(nsColor: appDelegate.ringColor)
 
-                    // White core — outer edge pinned at baseMargin, grows inward with thickness
-                    let w2 = T * 0.65
+                    // Core band — outer edge pinned at baseMargin, grows inward with thickness
+                    let w2 = T * 0.55
                     let m2 = baseMargin
                     let cr2 = cr
 
-                    // Amber fringe — wraps the white core: amberBorder outside (toward edge) and inside
-                    let amberBorder: CGFloat = min(T * 0.18, 25)
-                    let w0 = w2 + amberBorder * 2
-                    let m0 = baseMargin - amberBorder
-                    let cr0 = cr
+                    // Additive bloom stack: blurred copies of the core band summed with
+                    // .plusLighter so light accumulates where it concentrates — the
+                    // convex corner outer bleed and overlapping inner/outer tails get
+                    // brighter, straight runs stay even. This produces the cumulative
+                    // (non-flat) glow of the native Edge Light. The .compositingGroup()
+                    // keeps the additive math contained, then composites over the desktop.
+                    let bloom: [(blur: CGFloat, opacity: CGFloat)] = [
+                        (8, 0.70), (18, 0.58), (36, 0.46), (64, 0.34)
+                    ]
+                    ForEach(bloom.indices, id: \.self) { i in
+                        RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
+                            .fill(color.opacity(bloom[i].opacity))
+                            .blur(radius: bloom[i].blur * glowScale)
+                            .blendMode(.plusLighter)
+                    }
 
-                    // Layer 0: amber fringe wrapping the white core
-                    RoundedRingShape(thickness: w0, cornerRadius: cr0, margin: m0, menuBarHeight: menuBarH)
-                        .fill(color.opacity(b * 0.85))
-                        .blur(radius: amberBorder * 0.6 * glowScale)
-
-                    // Layer 1: warm color on core face — 1pt blur regardless of screen size
+                    // Warm tint on the core face — 1pt blur regardless of screen size
                     RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
-                        .fill(color.opacity(b * 0.95))
+                        .fill(color.opacity(0.95))
                         .blur(radius: 1.0)
 
-                    // Layer 2: bright white core — nearly sharp
+                    // Bright white center — the "bulb"
                     RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
-                        .fill(Color.white.opacity(b * 0.92))
+                        .fill(Color.white.opacity(0.92))
                         .blur(radius: 1.0)
                 }
+                .compositingGroup()
                 .mask(
                     Group {
                         if appDelegate.avoidMouse {
@@ -621,21 +571,9 @@ struct MenuBarControlView: View {
             
             // Controls - No Scroll
             VStack(spacing: 12) {
-                ControlSlider(icon: "sun.max.fill", label: "Brightness", value: $appDelegate.brightness, range: 0.1...1.0, unit: "%")
-                
+                ControlSlider(icon: "sun.max.fill", label: "Thickness", value: $appDelegate.ringThickness, range: 10...200, unit: "px")
+
                 TemperatureSlider(value: $appDelegate.colorTemperature)
-                
-                ControlSlider(icon: "rectangle.expand.vertical", label: "Thickness", value: $appDelegate.ringThickness, range: 10...200, unit: "px")
-                
-                HStack(spacing: 8) {
-                    Toggle("", isOn: $appDelegate.avoidMouse)
-                        .toggleStyle(.checkbox)
-                        .labelsHidden()
-                        .frame(width: 18)
-                    Text("Avoid Mouse")
-                        .font(.system(size: 12, weight: .medium))
-                    Spacer()
-                }
 
                 let screenCount = NSScreen.screens.count
                 if screenCount > 1 {
