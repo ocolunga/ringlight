@@ -11,47 +11,6 @@ import AVFoundation
 import CoreMediaIO
 import CoreGraphics
 
-// Brightness control helper using dynamic loading
-class BrightnessControl {
-    typealias SetBrightnessFunc = @convention(c) (CGDirectDisplayID, Float) -> Int32
-    typealias GetBrightnessFunc = @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<Float>) -> Int32
-    
-    private static var setBrightnessFunc: SetBrightnessFunc?
-    private static var getBrightnessFunc: GetBrightnessFunc?
-    private static var isLoaded = false
-    
-    static func loadDisplayServices() {
-        guard !isLoaded else { return }
-        isLoaded = true
-        
-        let handle = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_NOW)
-        if handle != nil {
-            if let setBrightness = dlsym(handle, "DisplayServicesSetBrightness") {
-                setBrightnessFunc = unsafeBitCast(setBrightness, to: SetBrightnessFunc.self)
-            }
-            if let getBrightness = dlsym(handle, "DisplayServicesGetBrightness") {
-                getBrightnessFunc = unsafeBitCast(getBrightness, to: GetBrightnessFunc.self)
-            }
-        }
-    }
-    
-    static func setBrightness(_ level: Float) {
-        loadDisplayServices()
-        if let setFunc = setBrightnessFunc {
-            _ = setFunc(CGMainDisplayID(), level)
-        }
-    }
-    
-    static func getBrightness() -> Float {
-        loadDisplayServices()
-        var level: Float = 1.0
-        if let getFunc = getBrightnessFunc {
-            _ = getFunc(CGMainDisplayID(), &level)
-        }
-        return level
-    }
-}
-
 @main
 struct RimLightApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -72,23 +31,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     var overlayScreen: NSScreen?
     
     @Published var ringThickness: CGFloat = 45
-    @Published var brightness: CGFloat = 1.0 {
-        didSet {
-            setSystemBrightness(Float(brightness))
-        }
-    }
     @Published var colorTemperature: CGFloat = 0.5
-    var overlayCornerRadius: CGFloat {
-        guard let screen = overlayScreen ?? NSScreen.main else { return 200 }
-        // Use 30% of the shorter dimension so the ring looks oval on all displays.
-        return min(screen.frame.width, screen.frame.height) * 0.30
-    }
+    // Outer CR scales with thickness so corners are tight at thin and round at thick,
+    // matching native behavior. Inner CR grows at a much lower rate so it stays squarer.
+    // outerCR = ringThickness × outerCRScale
+    // innerCR = outerCR × innerCRRatio  (capped at 20 minimum)
+    let outerCRScale: CGFloat = 1.0
+    let innerCRRatio: CGFloat = 0.7
     @Published var currentMonitorIndex: Int = 0
-    @Published var glowIntensity: CGFloat = 0.5
     @Published var isActive: Bool = true
     @Published var avoidMouse: Bool = true
     @Published var showCameraPreview: Bool = false
-    @Published var margin: CGFloat = 0
+    @Published var margin: CGFloat = 5
     @Published var mouseLocation: CGPoint = .zero
     @Published var isMouseOverRing: Bool = false
     
@@ -148,16 +102,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
         popover?.contentSize = NSSize(width: 260, height: 500)
     }
     
-    func setSystemBrightness(_ level: Float) {
-        BrightnessControl.setBrightness(level)
-    }
-    
-    func getSystemBrightness() -> Float {
-        return BrightnessControl.getBrightness()
-    }
-    
     func applicationDidFinishLaunching(_ notification: Notification) {
-        self.brightness = CGFloat(getSystemBrightness())
         NSApp.setActivationPolicy(.accessory)
         NSApplication.shared.windows.forEach { $0.close() }
         createOverlayWindow()
@@ -234,7 +179,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
         let hostingView = NSHostingView(rootView: RingLightOverlay(appDelegate: self))
         hostingView.frame = CGRect(origin: .zero, size: fullFrame.size)
+        hostingView.wantsLayer = true
         window.contentView = hostingView
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = 1.0
+        anim.toValue = 0.9999
+        anim.duration = 1.0
+        anim.repeatCount = .greatestFiniteMagnitude
+        anim.autoreverses = true
+        hostingView.layer?.add(anim, forKey: "keepAlive")
         window.orderFrontRegardless()
     }
     
@@ -420,39 +373,47 @@ struct RingLightOverlay: View {
             if appDelegate.isActive {
                 ZStack {
                     let glowScale = min(geometry.size.width, geometry.size.height) / 800.0
-                    let cr = appDelegate.overlayCornerRadius
                     let menuBarH = getMenuBarHeight()
                     let T = appDelegate.ringThickness
-                    let b = appDelegate.brightness
                     let baseMargin = appDelegate.margin
                     let color = Color(nsColor: appDelegate.ringColor)
 
-                    // White core — this is what grows with thickness
-                    let w2 = T * 0.65
-                    let m2 = baseMargin + (T - w2) / 2
-                    let cr2 = max(cr - (T - w2) / 2 * 0.6, 20)
+                    // Core band — outer edge pinned at baseMargin, grows inward with thickness
+                    let w2 = T * 0.55
+                    let m2 = baseMargin
 
-                    // Amber fringe — narrow fixed border on each side of the white core, capped at 25px
-                    let amberBorder: CGFloat = min(T * 0.18, 25)
-                    let w0 = min(w2 + amberBorder * 2, T)
-                    let m0 = baseMargin + (T - w0) / 2
-                    let cr0 = max(cr - (T - w0) / 2 * 0.6, 20)
+                    // Corner radii scale with T: tight at thin, round at thick (native behavior).
+                    // Outer tracks T directly; inner grows at a lower rate so it stays squarer.
+                    let outerCR = max(T * appDelegate.outerCRScale, 50)
+                    let innerCR = max(outerCR * appDelegate.innerCRRatio, 50)
 
-                    // Layer 0: amber fringe wrapping the white core
-                    RoundedRingShape(thickness: w0, cornerRadius: cr0, margin: m0, menuBarHeight: menuBarH)
-                        .fill(color.opacity(b * 0.85))
-                        .blur(radius: amberBorder * 0.6 * glowScale)
+                    // Additive bloom stack: blurred copies of the core band summed with
+                    // .plusLighter so light accumulates where it concentrates — the
+                    // convex corner outer bleed and overlapping inner/outer tails get
+                    // brighter, straight runs stay even. This produces the cumulative
+                    // (non-flat) glow of the native Edge Light. The .compositingGroup()
+                    // keeps the additive math contained, then composites over the desktop.
+                    let bloom: [(blur: CGFloat, opacity: CGFloat)] = [
+                        (8, 0.70), (18, 0.58), (36, 0.46), (64, 0.34)
+                    ]
+                    ForEach(bloom.indices, id: \.self) { i in
+                        RoundedRingShape(thickness: w2, cornerRadius: outerCR, innerCornerRadius: innerCR, margin: m2, menuBarHeight: menuBarH)
+                            .fill(color.opacity(bloom[i].opacity))
+                            .blur(radius: bloom[i].blur * glowScale)
+                            .blendMode(.plusLighter)
+                    }
 
-                    // Layer 1: warm color on core face — 1pt blur regardless of screen size
-                    RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
-                        .fill(color.opacity(b * 0.95))
+                    // Warm tint on the core face — 1pt blur regardless of screen size
+                    RoundedRingShape(thickness: w2, cornerRadius: outerCR, innerCornerRadius: innerCR, margin: m2, menuBarHeight: menuBarH)
+                        .fill(color.opacity(0.95))
                         .blur(radius: 1.0)
 
-                    // Layer 2: bright white core — nearly sharp
-                    RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
-                        .fill(Color.white.opacity(b * 0.92))
+                    // Bright white center — the "bulb"
+                    RoundedRingShape(thickness: w2, cornerRadius: outerCR, innerCornerRadius: innerCR, margin: m2, menuBarHeight: menuBarH)
+                        .fill(Color.white.opacity(0.92))
                         .blur(radius: 1.0)
                 }
+                .compositingGroup()
                 .mask(
                     Group {
                         if appDelegate.avoidMouse {
@@ -505,9 +466,10 @@ struct RingLightOverlay: View {
 struct RoundedRingShape: Shape {
     var thickness: CGFloat
     var cornerRadius: CGFloat
+    var innerCornerRadius: CGFloat
     var margin: CGFloat
     var menuBarHeight: CGFloat
-    
+
     func path(in rect: CGRect) -> Path {
         var path = Path()
         let outerRect = CGRect(
@@ -517,14 +479,13 @@ struct RoundedRingShape: Shape {
             height: rect.height - margin * 2 - menuBarHeight
         )
         path.addRoundedRect(in: outerRect, cornerSize: CGSize(width: cornerRadius, height: cornerRadius))
-        
+
         let innerRect = CGRect(
             x: rect.minX + margin + thickness,
             y: rect.minY + margin + thickness + menuBarHeight,
             width: rect.width - (margin + thickness) * 2,
             height: rect.height - (margin + thickness) * 2 - menuBarHeight
         )
-        let innerCornerRadius = max(cornerRadius - thickness * 0.6, 20)
         path.addRoundedRect(in: innerRect, cornerSize: CGSize(width: innerCornerRadius, height: innerCornerRadius))
         return path
     }
@@ -613,21 +574,9 @@ struct MenuBarControlView: View {
             
             // Controls - No Scroll
             VStack(spacing: 12) {
-                ControlSlider(icon: "sun.max.fill", label: "Brightness", value: $appDelegate.brightness, range: 0.1...1.0, unit: "%")
-                
+                ControlSlider(icon: "sun.max.fill", label: "Thickness", value: $appDelegate.ringThickness, range: 15...190, unit: "px")
+
                 TemperatureSlider(value: $appDelegate.colorTemperature)
-                
-                ControlSlider(icon: "rectangle.expand.vertical", label: "Thickness", value: $appDelegate.ringThickness, range: 10...200, unit: "px")
-                
-                HStack(spacing: 8) {
-                    Toggle("", isOn: $appDelegate.avoidMouse)
-                        .toggleStyle(.checkbox)
-                        .labelsHidden()
-                        .frame(width: 18)
-                    Text("Avoid Mouse")
-                        .font(.system(size: 12, weight: .medium))
-                    Spacer()
-                }
 
                 let screenCount = NSScreen.screens.count
                 if screenCount > 1 {
