@@ -177,7 +177,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
         if currentMonitorIndex >= screens.count {
             currentMonitorIndex = max(0, screens.count - 1)
         }
-        overlayWindow?.close()
+        overlayWindow?.orderOut(nil)
         overlayWindow = nil
         createOverlayWindow()
     }
@@ -233,7 +233,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
         window.ignoresMouseEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
         let hostingView = NSHostingView(rootView: RingLightOverlay(appDelegate: self))
-        hostingView.frame = fullFrame
+        hostingView.frame = CGRect(origin: .zero, size: fullFrame.size)
         window.contentView = hostingView
         window.orderFrontRegardless()
     }
@@ -241,10 +241,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     func switchMonitor() {
         let screens = NSScreen.screens
         guard screens.count > 1 else { return }
-        currentMonitorIndex = (currentMonitorIndex + 1) % screens.count
-        overlayWindow?.close()
-        overlayWindow = nil
-        createOverlayWindow()
+        let newIndex = (currentMonitorIndex + 1) % screens.count
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.overlayWindow?.orderOut(nil)
+            self.overlayWindow = nil
+            self.currentMonitorIndex = newIndex
+            self.createOverlayWindow()
+        }
     }
 
     func createMenuBarIcon() {
@@ -494,8 +498,7 @@ struct RingLightOverlay: View {
     
     func getMenuBarHeight() -> CGFloat {
         guard let screen = appDelegate.overlayScreen ?? NSScreen.main else { return 25 }
-        let height = screen.frame.height - screen.visibleFrame.height - screen.visibleFrame.origin.y
-        return max(height, 0)
+        return max(screen.frame.maxY - screen.visibleFrame.maxY, 0)
     }
 }
 
