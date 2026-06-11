@@ -408,27 +408,28 @@ struct RingLightOverlay: View {
                     let baseMargin = appDelegate.margin
                     let color = Color(nsColor: appDelegate.ringColor)
 
-                    // Layer 0: Tight amber fringe — full width, small soft halo at both edges
-                    RoundedRingShape(thickness: T, cornerRadius: cr, margin: baseMargin, menuBarHeight: menuBarH)
-                        .fill(color.opacity(b * 0.80))
-                        .blur(radius: T * 0.06 * glowScale)
-
-                    // Layer 1: Warm amber body — 85% of width, nearly solid
-                    let w1 = T * 0.85
-                    let m1 = baseMargin + (T - w1) / 2
-                    let cr1 = max(cr - (T - w1) / 2 * 0.6, 20)
-                    RoundedRingShape(thickness: w1, cornerRadius: cr1, margin: m1, menuBarHeight: menuBarH)
-                        .fill(color.opacity(b * 0.90))
-                        .blur(radius: T * 0.025 * glowScale)
-
-                    // Layer 2: Bright warm-white core — 60% of width
-                    let w2 = T * 0.60
+                    // White core — this is what grows with thickness
+                    let w2 = T * 0.65
                     let m2 = baseMargin + (T - w2) / 2
                     let cr2 = max(cr - (T - w2) / 2 * 0.6, 20)
+
+                    // Amber fringe — narrow fixed border on each side of the white core, capped at 25px
+                    let amberBorder: CGFloat = min(T * 0.18, 25)
+                    let w0 = min(w2 + amberBorder * 2, T)
+                    let m0 = baseMargin + (T - w0) / 2
+                    let cr0 = max(cr - (T - w0) / 2 * 0.6, 20)
+
+                    // Layer 0: amber fringe wrapping the white core
+                    RoundedRingShape(thickness: w0, cornerRadius: cr0, margin: m0, menuBarHeight: menuBarH)
+                        .fill(color.opacity(b * 0.85))
+                        .blur(radius: amberBorder * 0.6 * glowScale)
+
+                    // Layer 1: warm color on core face
                     RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
                         .fill(color.opacity(b * 0.95))
                         .blur(radius: T * 0.015 * glowScale)
 
+                    // Layer 2: bright white core
                     RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
                         .fill(Color.white.opacity(b * 0.85))
                         .blur(radius: T * 0.015 * glowScale)
