@@ -424,15 +424,15 @@ struct RingLightOverlay: View {
                         .fill(color.opacity(b * 0.85))
                         .blur(radius: amberBorder * 0.6 * glowScale)
 
-                    // Layer 1: warm color on core face
+                    // Layer 1: warm color on core face — fixed small blur so it stays solid
                     RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
                         .fill(color.opacity(b * 0.95))
-                        .blur(radius: T * 0.015 * glowScale)
+                        .blur(radius: 2 * glowScale)
 
-                    // Layer 2: bright white core
+                    // Layer 2: bright white core — nearly sharp
                     RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
-                        .fill(Color.white.opacity(b * 0.85))
-                        .blur(radius: T * 0.015 * glowScale)
+                        .fill(Color.white.opacity(b * 0.92))
+                        .blur(radius: 2 * glowScale)
                 }
                 .mask(
                     Group {
