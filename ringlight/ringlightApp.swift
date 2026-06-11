@@ -400,59 +400,41 @@ struct RingLightOverlay: View {
         GeometryReader { geometry in
             if appDelegate.isActive {
                 ZStack {
-                    // Scale glow with the shorter screen dimension so it spreads
-                    // proportionally on large displays.
                     let glowScale = min(geometry.size.width, geometry.size.height) / 800.0
-                    let blurRadii: [CGFloat]         = [2 * glowScale, 4 * glowScale, 8 * glowScale]
-
                     let cr = appDelegate.overlayCornerRadius
                     let menuBarH = getMenuBarHeight()
-                    let opacityFactors: [Double] = [0.8, 0.5, 0.3]
+                    let T = appDelegate.ringThickness
+                    let b = appDelegate.brightness
+                    let color = Color(nsColor: appDelegate.ringColor)
 
-                    // The colored strip lives only at the inner edge of the ring band.
-                    let innerEdgeWidth: CGFloat = 6
-                    let innerEdgeMargin = appDelegate.margin + appDelegate.ringThickness - innerEdgeWidth
-                    // Corner radius at the inner-edge position (matches what RoundedRingShape
-                    // would compute for the outer rect at this inset depth).
-                    let innerEdgeCR = max(cr - (appDelegate.ringThickness - innerEdgeWidth) * 0.6, 20)
+                    // Narrow ring centered within the band — used only for the bright core highlight.
+                    let coreW = T * 0.15
+                    let coreMargin = appDelegate.margin + (T - coreW) / 2
+                    let coreCR = max(cr - T * 0.3, 20)
 
-                    // Glow layers: emanate from the inner-edge strip with the correct corner
-                    // radius for that position so the halo follows the ring curve.
-                    ForEach(0..<3) { layer in
-                        RoundedRingShape(
-                            thickness: innerEdgeWidth,
-                            cornerRadius: innerEdgeCR,
-                            margin: innerEdgeMargin,
-                            menuBarHeight: menuBarH
-                        )
-                        .fill(
-                            Color(nsColor: appDelegate.ringColor)
-                                .opacity(appDelegate.brightness * appDelegate.glowIntensity * opacityFactors[layer])
-                        )
-                        .blur(radius: blurRadii[layer])
-                    }
+                    // Layer 0: Wide ambient halo from the full ring body
+                    RoundedRingShape(thickness: T, cornerRadius: cr, margin: appDelegate.margin, menuBarHeight: menuBarH)
+                        .fill(color.opacity(b * 0.35))
+                        .blur(radius: T * 0.35 * glowScale)
 
-                    // Solid tone ring — colored edges
-                    RoundedRingShape(
-                        thickness: appDelegate.ringThickness,
-                        cornerRadius: cr,
-                        margin: appDelegate.margin,
-                        menuBarHeight: menuBarH
-                    )
-                    .fill(Color(nsColor: appDelegate.ringColor).opacity(appDelegate.brightness))
+                    // Layer 1: Main warm body with soft edges
+                    RoundedRingShape(thickness: T, cornerRadius: cr, margin: appDelegate.margin, menuBarHeight: menuBarH)
+                        .fill(color.opacity(b * 0.70))
+                        .blur(radius: T * 0.08 * glowScale)
 
-                    // White covering — starts from outer edge of ring, leaves innerEdgeWidth
-                    // of tone color visible only at the inner edge (screen-center side).
-                    let centerWidth = appDelegate.ringThickness - innerEdgeWidth
-                    let centerMargin = appDelegate.margin
-                    RoundedRingShape(
-                        thickness: centerWidth,
-                        cornerRadius: cr,
-                        margin: centerMargin,
-                        menuBarHeight: menuBarH
-                    )
-                    .fill(Color.white.opacity(appDelegate.brightness * 0.85))
-                    .blur(radius: 4)
+                    // Layer 2: Solid warm fill
+                    RoundedRingShape(thickness: T, cornerRadius: cr, margin: appDelegate.margin, menuBarHeight: menuBarH)
+                        .fill(color.opacity(b * 0.85))
+                        .blur(radius: T * 0.02 * glowScale)
+
+                    // Layer 3: Bright warm-white core highlight
+                    RoundedRingShape(thickness: coreW, cornerRadius: coreCR, margin: coreMargin, menuBarHeight: menuBarH)
+                        .fill(color.opacity(b))
+                        .blur(radius: T * 0.015 * glowScale)
+
+                    RoundedRingShape(thickness: coreW, cornerRadius: coreCR, margin: coreMargin, menuBarHeight: menuBarH)
+                        .fill(Color.white.opacity(b * 0.55))
+                        .blur(radius: T * 0.015 * glowScale)
                 }
                 .mask(
                     Group {
