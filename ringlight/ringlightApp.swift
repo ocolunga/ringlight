@@ -87,7 +87,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     @Published var isActive: Bool = true
     @Published var avoidMouse: Bool = true
     @Published var showCameraPreview: Bool = false
-    @Published var margin: CGFloat = 20
+    @Published var margin: CGFloat = 0
     @Published var mouseLocation: CGPoint = .zero
     @Published var isMouseOverRing: Bool = false
     
@@ -408,30 +408,30 @@ struct RingLightOverlay: View {
                     let baseMargin = appDelegate.margin
                     let color = Color(nsColor: appDelegate.ringColor)
 
-                    // Layer 0: Ambient outer glow — full width, diffuse
+                    // Layer 0: Tight amber fringe — full width, small soft halo at both edges
                     RoundedRingShape(thickness: T, cornerRadius: cr, margin: baseMargin, menuBarHeight: menuBarH)
-                        .fill(color.opacity(b * 0.25))
-                        .blur(radius: T * 0.25 * glowScale)
+                        .fill(color.opacity(b * 0.80))
+                        .blur(radius: T * 0.06 * glowScale)
 
-                    // Layer 1: Warm amber fringe — 82% of width, soft edges on both sides
-                    let w1 = T * 0.82
+                    // Layer 1: Warm amber body — 85% of width, nearly solid
+                    let w1 = T * 0.85
                     let m1 = baseMargin + (T - w1) / 2
                     let cr1 = max(cr - (T - w1) / 2 * 0.6, 20)
                     RoundedRingShape(thickness: w1, cornerRadius: cr1, margin: m1, menuBarHeight: menuBarH)
-                        .fill(color.opacity(b * 0.65))
-                        .blur(radius: T * 0.06 * glowScale)
+                        .fill(color.opacity(b * 0.90))
+                        .blur(radius: T * 0.025 * glowScale)
 
-                    // Layer 2: Bright warm-white core — 60% of width, dominates the ring face
+                    // Layer 2: Bright warm-white core — 60% of width
                     let w2 = T * 0.60
                     let m2 = baseMargin + (T - w2) / 2
                     let cr2 = max(cr - (T - w2) / 2 * 0.6, 20)
                     RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
-                        .fill(color.opacity(b * 0.85))
-                        .blur(radius: T * 0.025 * glowScale)
+                        .fill(color.opacity(b * 0.95))
+                        .blur(radius: T * 0.015 * glowScale)
 
                     RoundedRingShape(thickness: w2, cornerRadius: cr2, margin: m2, menuBarHeight: menuBarH)
-                        .fill(Color.white.opacity(b * 0.65))
-                        .blur(radius: T * 0.025 * glowScale)
+                        .fill(Color.white.opacity(b * 0.85))
+                        .blur(radius: T * 0.015 * glowScale)
                 }
                 .mask(
                     Group {
@@ -598,7 +598,7 @@ struct MenuBarControlView: View {
                 
                 TemperatureSlider(value: $appDelegate.colorTemperature)
                 
-                ControlSlider(icon: "rectangle.expand.vertical", label: "Thickness", value: $appDelegate.ringThickness, range: 10...100, unit: "px")
+                ControlSlider(icon: "rectangle.expand.vertical", label: "Thickness", value: $appDelegate.ringThickness, range: 10...200, unit: "px")
                 
                 HStack(spacing: 8) {
                     Toggle("", isOn: $appDelegate.avoidMouse)
