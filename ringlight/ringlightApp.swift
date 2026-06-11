@@ -83,6 +83,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
         // Use 30% of the shorter dimension so the ring looks oval on all displays.
         return min(screen.frame.width, screen.frame.height) * 0.30
     }
+    @Published var currentMonitorIndex: Int = 0
     @Published var glowIntensity: CGFloat = 0.5
     @Published var isActive: Bool = true
     @Published var avoidMouse: Bool = true
@@ -172,7 +173,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     }
 
     @objc func screensDidChange() {
-        guard let newMain = NSScreen.main, newMain.frame != overlayScreen?.frame else { return }
+        let screens = NSScreen.screens
+        if currentMonitorIndex >= screens.count {
+            currentMonitorIndex = max(0, screens.count - 1)
+        }
         overlayWindow?.close()
         overlayWindow = nil
         createOverlayWindow()
@@ -210,7 +214,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
     }
     
     func createOverlayWindow() {
-        guard let screen = NSScreen.main else { return }
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return }
+        let screen = screens[min(currentMonitorIndex, screens.count - 1)]
         overlayScreen = screen
         let fullFrame = screen.frame
         overlayWindow = OverlayWindow(
@@ -232,6 +238,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSPopoverD
         window.orderFrontRegardless()
     }
     
+    func switchMonitor() {
+        let screens = NSScreen.screens
+        guard screens.count > 1 else { return }
+        currentMonitorIndex = (currentMonitorIndex + 1) % screens.count
+        overlayWindow?.close()
+        overlayWindow = nil
+        createOverlayWindow()
+    }
+
     func createMenuBarIcon() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
@@ -609,6 +624,25 @@ struct MenuBarControlView: View {
                     Text("Avoid Mouse")
                         .font(.system(size: 12, weight: .medium))
                     Spacer()
+                }
+
+                let screenCount = NSScreen.screens.count
+                if screenCount > 1 {
+                    HStack(spacing: 8) {
+                        Image(systemName: "display.2")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .frame(width: 18)
+                        Text("Monitor \(appDelegate.currentMonitorIndex + 1) of \(screenCount)")
+                            .font(.system(size: 12, weight: .medium))
+                        Spacer()
+                        Button("Switch") {
+                            appDelegate.switchMonitor()
+                        }
+                        .font(.system(size: 11))
+                        .buttonStyle(.plain)
+                        .foregroundColor(.accentColor)
+                    }
                 }
             }
             .padding(16)
