@@ -435,16 +435,16 @@ struct RingLightOverlay: View {
                     let baseMargin = appDelegate.margin
                     let color = Color(nsColor: appDelegate.ringColor)
 
-                    // White core — this is what grows with thickness
+                    // White core — outer edge pinned at baseMargin, grows inward with thickness
                     let w2 = T * 0.65
-                    let m2 = baseMargin + (T - w2) / 2
-                    let cr2 = max(cr - (T - w2) / 2 * 0.6, 20)
+                    let m2 = baseMargin
+                    let cr2 = cr
 
-                    // Amber fringe — narrow fixed border on each side of the white core, capped at 25px
+                    // Amber fringe — wraps the white core: amberBorder outside (toward edge) and inside
                     let amberBorder: CGFloat = min(T * 0.18, 25)
-                    let w0 = min(w2 + amberBorder * 2, T)
-                    let m0 = baseMargin + (T - w0) / 2
-                    let cr0 = max(cr - (T - w0) / 2 * 0.6, 20)
+                    let w0 = w2 + amberBorder * 2
+                    let m0 = baseMargin - amberBorder
+                    let cr0 = cr
 
                     // Layer 0: amber fringe wrapping the white core
                     RoundedRingShape(thickness: w0, cornerRadius: cr0, margin: m0, menuBarHeight: menuBarH)
